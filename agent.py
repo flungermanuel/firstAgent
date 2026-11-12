@@ -16,7 +16,7 @@ tools = [
             "properties" : {
                 "ordner" :{
                     "type" : "string",
-                    "description" : "name des zu durchsuchenden ordners zB notizen"
+                    "description" : "name des zu durchsuchenden ordners der in meinem angegeben ordner liegt zB suche in vorlesungen nach txt dateien vorlesungen ist dabei unterordner vom notizen ordner verwende '.' wenn nach dem notizen ordner selbst egfragt wird. ordner selbst gib keinen absoluten pfad an "
                 } 
             },
 
@@ -30,36 +30,36 @@ TOOL_FUNKTIONEN = {"find_txt_and_md_files": find_txt_and_md_files}
 SYSTEM_PROMPT = "Du hilfst bei Fragen zu Textdateien in Ordnern. Antworte auf Deutsch, kurz und gut lesbar."
 
 
-def frage_agent(messages,frage, max_runden=5):
+def frage_agent(messages, frage, max_runden=5, max_tokens=1024):
+    start = len(messages)
     messages.append({"role": "user", "content": frage})
 
     for runde in range(max_runden):
         response = client.messages.create(
             model=MODEL,
-            max_tokens=1024,
+            max_tokens=max_tokens,
             system=SYSTEM_PROMPT,
             tools=tools,
             messages=messages,
         )
 
-        if response.stop_reason == "end_turn":  
-            liste=[]
+        messages.append({"role": "assistant", "content": response.content})
+
+        if response.stop_reason != "tool_use":
+            liste = []
             for block in response.content:
                 if block.type == "text":
-                    liste.append(block.text) 
-
-            
-            final= "\n".join(liste)
-            messages.append({"role": "assistant", "content": response.content})
-            return final
-
-        messages.append({"role": "assistant", "content": response.content})
+                    liste.append(block.text)
+            text = "\n".join(liste)
+            if response.stop_reason == "max_tokens":
+                text += "\n[Antwort wurde abgeschnitten]"
+            return text
 
         ergebnisse = []
         for block in response.content:
             if block.type == "tool_use":
                 print(f"  [Runde {runde + 1}] Tool: {block.name}({block.input})")
-                funktion = TOOL_FUNKTIONEN[block.name]            
+                funktion = TOOL_FUNKTIONEN[block.name]
                 ergebnis = funktion(**block.input)
                 ergebnisse.append({
                     "type": "tool_result",
@@ -67,9 +67,9 @@ def frage_agent(messages,frage, max_runden=5):
                     "content": json.dumps(ergebnis, ensure_ascii=False),
                 })
 
-        if ergebnisse:
-            messages.append({"role" : "user" , "content" : ergebnisse})     
+        messages.append({"role": "user", "content": ergebnisse})
 
+    del messages[start:]
     return "Abbruch: zu viele Runden."
 
 
